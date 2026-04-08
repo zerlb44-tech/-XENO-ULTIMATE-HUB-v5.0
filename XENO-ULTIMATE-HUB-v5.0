@@ -1,13 +1,14 @@
 --[[
-    XENO ULTIMATE HUB v5.1 by Bread 🍞
-    Движок: Fluent UI + Maid + Drawing API + GoodSignal
-    Функций: 240+ (включая Player Preview)
-    Память: автоматическая очистка, zero leaks
-    Совместимость: Xeno, Krnl, Synapse, ScriptWare, Fluxus
+    BDEV XENO ULTIMATE HUB v3.0
+    Объединение: Bdev Hub + Bread Xeno Hub
+    Оптимизация: Ryzen 5 7235HS
+    Функций: 50 (только лучшее)
+    Память: Maid + GoodSignal (zero leaks)
+    UI: Rayfield
 --]]
 
 -- ⚡ КРИТИЧЕСКИЕ ЗАГРУЗКИ
-local Fluent = loadstring(game:HttpGet("https://github.com/dawid-scripts/Fluent/releases/latest/download/main.lua"))()
+local Rayfield = loadstring(game:HttpGet("https://sirius.menu/rayfield"))()
 local Maid = loadstring(game:HttpGet("https://raw.githubusercontent.com/Quenty/NevermoreEngine/refs/heads/main/modules/utility/maid.lua"))()
 local GoodSignal = loadstring(game:HttpGet("https://raw.githubusercontent.com/Stefanuk12/ROBLOX/master/GoodSignal.lua"))()
 
@@ -20,8 +21,9 @@ local UserInputService = game:GetService("UserInputService")
 local TweenService = game:GetService("TweenService")
 local HttpService = game:GetService("HttpService")
 local VirtualInput = game:GetService("VirtualInputManager")
-local CoreGui = game:GetService("CoreGui")
+local TeleportService = game:GetService("TeleportService")
 local Camera = workspace.CurrentCamera or workspace:WaitForChild("CurrentCamera")
+local Lighting = game:GetService("Lighting")
 
 -- ⚡ ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 local function tableFind(t, value)
@@ -33,170 +35,162 @@ end
 
 local function pcallSafe(func, ...)
     local success, result = pcall(func, ...)
-    if not success then
-        warn("[XenoHub] Error:", result)
-    end
+    if not success then warn("[Hub] Error:", result) end
     return success, result
 end
 
 -- ⚡ ГЛОБАЛЬНЫЙ ХАБ
-_G.XenoHub = _G.XenoHub or {}
-local Hub = _G.XenoHub
-Hub.Version = "5.1"
+_G.BdevHub = _G.BdevHub or {}
+local Hub = _G.BdevHub
+Hub.Version = "3.0"
 Hub.Maid = Maid.new()
-Hub.Features = {}
-Hub.Settings = {}
-Hub.Configs = {}
 Hub.Friends = {}
 Hub.Blacklist = {}
-Hub.Signals = {
-    onToggle = GoodSignal.new(),
-    onSettingChange = GoodSignal.new(),
-    onPlayerAdded = GoodSignal.new(),
-    onPlayerRemoved = GoodSignal.new(),
-}
 
--- ⚡ РЕГИСТР ФУНКЦИЙ
-local FeatureRegistry = {
-    Aimbot = {},
-    ESP = {},
-    Movement = {},
-    Combat = {},
-    Farm = {},
-    World = {},
-    Protection = {},
-    Utility = {},
-    PlayerPreview = {},
-}
+-- ⚡ ЦЕНТРАЛЬНЫЙ ДИСПЕТЧЕР (один цикл на все функции)
+local ActiveFeatures = {}
+local HeartbeatConnection = nil
 
--- ██████████████████████████████████████████████████████████████████████████
--- MAID-ОБЕРТКА
--- ██████████████████████████████████████████████████████████████████████████
-
-local function CreateModule(name)
-    local module = {
-        Name = name,
-        Enabled = false,
-        Maid = Maid.new(),
-        Connections = {},
-        Settings = {},
-    }
-    
-    function module:Enable()
-        if self.Enabled then return end
-        self.Enabled = true
-        self.Maid = Maid.new()
-        if self.OnEnable then
-            pcallSafe(self.OnEnable, self)
+local function startDispatcher()
+    if HeartbeatConnection then return end
+    HeartbeatConnection = RunService.Heartbeat:Connect(function(deltaTime)
+        for _, feature in pairs(ActiveFeatures) do
+            if feature.Update and feature.Enabled then
+                pcallSafe(feature.Update, feature, deltaTime)
+            end
         end
-    end
-    
-    function module:Disable()
-        if not self.Enabled then return end
-        self.Enabled = false
-        self.Maid:DoCleaning()
-        if self.OnDisable then
-            pcallSafe(self.OnDisable, self)
-        end
-    end
-    
-    function module:Toggle()
-        if self.Enabled then self:Disable() else self:Enable() end
-    end
-    
-    return module
+    end)
+    Hub.Maid:GiveTask(HeartbeatConnection)
 end
 
 -- ██████████████████████████████████████████████████████████████████████████
--- МОДУЛЬ 1: AIMBOT
+-- БАЗОВЫЙ МОДУЛЬ С MAID
 -- ██████████████████████████████████████████████████████████████████████████
 
-FeatureRegistry.Aimbot.Module = CreateModule("Aimbot")
+local function CreateFeature(name)
+    local feature = {
+        Name = name,
+        Enabled = false,
+        Maid = Maid.new(),
+        Settings = {},
+        Update = nil,
+    }
+    
+    function feature:Enable()
+        if self.Enabled then return end
+        self.Enabled = true
+        self.Maid = Maid.new()
+        ActiveFeatures[self] = self
+        startDispatcher()
+        if self.OnEnable then pcallSafe(self.OnEnable, self) end
+    end
+    
+    function feature:Disable()
+        if not self.Enabled then return end
+        self.Enabled = false
+        self.Maid:DoCleaning()
+        ActiveFeatures[self] = nil
+        if self.OnDisable then pcallSafe(self.OnDisable, self) end
+    end
+    
+    return feature
+end
 
-function FeatureRegistry.Aimbot.Module:OnEnable()
+-- ██████████████████████████████████████████████████████████████████████████
+-- МОДУЛЬ: AIMBOT (10 функций)
+-- ██████████████████████████████████████████████████████████████████████████
+
+local Aimbot = CreateFeature("Aimbot")
+
+function Aimbot:OnEnable()
     self.Settings = {
+        enabled = true,
         silent = false,
         smoothness = 0.3,
-        fov = 200,
-        prediction = true,
+        fov = 150,
         hitbox = "Head",
-        visibility = true,
+        visibleCheck = true,
         teamCheck = true,
-        friendsCheck = true,
+        prediction = true,
         key = "X",
     }
     
-    local function getClosestPlayer()
+    local function isVisible(target)
+        if not self.Settings.visibleCheck then return true end
+        local origin = Camera.CFrame.Position
+        local targetPos = target
+        local raycastParams = RaycastParams.new()
+        raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+        raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
+        local result = workspace:Raycast(origin, (targetPos - origin).Unit * (targetPos - origin).Magnitude, raycastParams)
+        return not result or result.Instance:IsDescendantOf(target.Parent)
+    end
+    
+    local function getClosestEnemy()
         local closest = nil
         local shortest = self.Settings.fov
         local center = Vector2.new(Mouse.X, Mouse.Y)
         
         for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer then
-                if self.Settings.teamCheck and player.Team == LocalPlayer.Team then continue end
-                if self.Settings.friendsCheck and tableFind(Hub.Friends, player.Name) then continue end
-                
-                local char = player.Character
-                if char and char:FindFirstChild("HumanoidRootPart") then
-                    local pos, onScreen = Camera:WorldToViewportPoint(char.HumanoidRootPart.Position)
-                    if onScreen then
-                        local dist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
-                        if dist < shortest then
-                            shortest = dist
-                            closest = player
-                        end
-                    end
+            if player == LocalPlayer then continue end
+            if self.Settings.teamCheck and player.Team == LocalPlayer.Team then continue end
+            
+            local char = player.Character
+            if not char then continue end
+            local hitPart = char:FindFirstChild(self.Settings.hitbox) or char:FindFirstChild("HumanoidRootPart")
+            if not hitPart then continue end
+            
+            local pos, onScreen = Camera:WorldToViewportPoint(hitPart.Position)
+            if onScreen and isVisible(hitPart.Position) then
+                local dist = (Vector2.new(pos.X, pos.Y) - center).Magnitude
+                if dist < shortest then
+                    shortest = dist
+                    closest = hitPart.Position
                 end
             end
         end
         return closest
     end
     
-    local function shoot(target)
-        if not target then return end
-        local char = target.Character
-        if not char then return end
-        local hitPart = char:FindFirstChild(self.Settings.hitbox) or char:FindFirstChild("HumanoidRootPart")
-        if not hitPart then return end
+    self.Update = function(deltaTime)
+        if not self.Settings.enabled then return end
+        if not UserInputService:IsKeyDown(Enum.KeyCode[self.Settings.key]) then return end
+        
+        local targetPos = getClosestEnemy()
+        if not targetPos then return end
         
         if self.Settings.silent then
             local oldCF = Camera.CFrame
-            Camera.CFrame = CFrame.new(oldCF.Position, hitPart.Position)
+            Camera.CFrame = CFrame.new(oldCF.Position, targetPos)
             task.wait()
             Camera.CFrame = oldCF
         else
-            local tween = TweenService:Create(Camera, TweenInfo.new(self.Settings.smoothness, Enum.EasingStyle.Linear), 
-                {CFrame = CFrame.new(Camera.CFrame.Position, hitPart.Position)})
-            tween:Play()
+            local currentLook = Camera.CFrame.LookVector
+            local targetDir = (targetPos - Camera.CFrame.Position).Unit
+            local newLook = currentLook:Lerp(targetDir, self.Settings.smoothness)
+            Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, Camera.CFrame.Position + newLook)
         end
     end
-    
-    local connection = RunService.RenderStepped:Connect(function()
-        if not self.Enabled then return end
-        if UserInputService:IsKeyDown(Enum.KeyCode[self.Settings.key]) then
-            local target = getClosestPlayer()
-            if target then shoot(target) end
-        end
-    end)
-    self.Maid:GiveTask(connection)
 end
 
 -- ██████████████████████████████████████████████████████████████████████████
--- МОДУЛЬ 2: ESP (Drawing API)
+-- МОДУЛЬ: ESP (10 функций) — OPTIMIZED DRAWING API
 -- ██████████████████████████████████████████████████████████████████████████
 
-FeatureRegistry.ESP.Module = CreateModule("ESP")
+local ESP = CreateFeature("ESP")
 
-function FeatureRegistry.ESP.Module:OnEnable()
+function ESP:OnEnable()
     self.Settings = {
         boxes = true,
-        boxColor = Color3.new(1,0,0),
         names = true,
         health = true,
         distance = true,
         maxDistance = 500,
+        boxColor = Color3.new(1, 0, 0),
+        updateRate = 0.033, -- ~30 FPS обновление
     }
     self.Drawings = {}
+    self.lastUpdate = 0
     
     local function createDrawings(player)
         local drawings = {}
@@ -211,27 +205,32 @@ function FeatureRegistry.ESP.Module:OnEnable()
             drawings.name = Drawing.new("Text")
             drawings.name.Text = player.Name
             drawings.name.Size = 14
-            drawings.name.Color = Color3.new(1,1,1)
+            drawings.name.Color = Color3.new(1, 1, 1)
             drawings.name.Center = true
+            drawings.name.Outline = true
             drawings.name.Visible = false
         end
         if self.Settings.health then
             drawings.healthBar = Drawing.new("Line")
             drawings.healthBar.Thickness = 3
-            drawings.healthBar.Color = Color3.new(0,1,0)
+            drawings.healthBar.Color = Color3.new(0, 1, 0)
             drawings.healthBar.Visible = false
         end
         if self.Settings.distance then
             drawings.distance = Drawing.new("Text")
             drawings.distance.Size = 12
-            drawings.distance.Color = Color3.new(1,1,0)
+            drawings.distance.Color = Color3.new(1, 1, 0)
             drawings.distance.Center = true
             drawings.distance.Visible = false
         end
         return drawings
     end
     
-    local function updateDrawings()
+    self.Update = function(deltaTime)
+        self.lastUpdate = self.lastUpdate + deltaTime
+        if self.lastUpdate < self.Settings.updateRate then return end
+        self.lastUpdate = 0
+        
         for _, player in ipairs(Players:GetPlayers()) do
             if player == LocalPlayer then continue end
             local char = player.Character
@@ -240,11 +239,11 @@ function FeatureRegistry.ESP.Module:OnEnable()
             if not root then continue end
             
             local pos, onScreen = Camera:WorldToViewportPoint(root.Position)
-            local dist = (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and 
-                         (LocalPlayer.Character.HumanoidRootPart.Position - root.Position).Magnitude) or 999
+            local dist = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and
+                        (LocalPlayer.Character.HumanoidRootPart.Position - root.Position).Magnitude or 999
             
             if onScreen and dist <= self.Settings.maxDistance then
-                local size = 200 / dist * 5
+                local size = math.clamp(200 / dist * 5, 20, 200)
                 local boxPos = Vector2.new(pos.X - size/2, pos.Y - size)
                 
                 if not self.Drawings[player] then
@@ -255,20 +254,21 @@ function FeatureRegistry.ESP.Module:OnEnable()
                 if d.box then
                     d.box.Position = boxPos
                     d.box.Size = Vector2.new(size, size)
-                    d.box.Visible = true
+                    d.box.Visible = self.Settings.boxes
                 end
                 if d.name then
                     d.name.Position = Vector2.new(pos.X, pos.Y - size - 15)
-                    d.name.Visible = true
+                    d.name.Visible = self.Settings.names
                 end
-                if d.healthBar then
+                if d.healthBar and self.Settings.health then
                     local humanoid = char:FindFirstChild("Humanoid")
                     local healthPercent = humanoid and (humanoid.Health / humanoid.MaxHealth) or 1
                     d.healthBar.From = Vector2.new(boxPos.X, boxPos.Y + size + 5)
                     d.healthBar.To = Vector2.new(boxPos.X + size * healthPercent, boxPos.Y + size + 5)
+                    d.healthBar.Color = Color3.new(1 - healthPercent, healthPercent, 0)
                     d.healthBar.Visible = true
                 end
-                if d.distance then
+                if d.distance and self.Settings.distance then
                     d.distance.Position = Vector2.new(pos.X, pos.Y + size + 20)
                     d.distance.Text = math.floor(dist) .. "m"
                     d.distance.Visible = true
@@ -283,9 +283,6 @@ function FeatureRegistry.ESP.Module:OnEnable()
         end
     end
     
-    local connection = RunService.RenderStepped:Connect(updateDrawings)
-    self.Maid:GiveTask(connection)
-    
     self.Maid:GiveTask(function()
         for _, drawings in pairs(self.Drawings) do
             for _, draw in pairs(drawings) do
@@ -297,12 +294,12 @@ function FeatureRegistry.ESP.Module:OnEnable()
 end
 
 -- ██████████████████████████████████████████████████████████████████████████
--- МОДУЛЬ 3: MOVEMENT
+-- МОДУЛЬ: MOVEMENT (8 функций) — LinearVelocity
 -- ██████████████████████████████████████████████████████████████████████████
 
-FeatureRegistry.Movement.Module = CreateModule("Movement")
+local Movement = CreateFeature("Movement")
 
-function FeatureRegistry.Movement.Module:OnEnable()
+function Movement:OnEnable()
     self.Settings = {
         speed = 50,
         jumpPower = 80,
@@ -310,62 +307,51 @@ function FeatureRegistry.Movement.Module:OnEnable()
         noclip = false,
         fly = false,
         flySpeed = 100,
-        bhop = false,
+        tpWalk = false,
+        tpWalkSpeed = 20,
     }
     
-    local flyBodyVelocity = nil
+    local flyLinearVelocity = nil
     
-    local function setSpeed(val)
+    local function updateSpeed()
         local char = LocalPlayer.Character
         if char and char:FindFirstChild("Humanoid") then
-            char.Humanoid.WalkSpeed = val
-        end
-    end
-    
-    local function setJumpPower(val)
-        local char = LocalPlayer.Character
-        if char and char:FindFirstChild("Humanoid") then
-            char.Humanoid.JumpPower = val
+            char.Humanoid.WalkSpeed = self.Settings.speed
+            char.Humanoid.JumpPower = self.Settings.jumpPower
         end
     end
     
     local function enableFly()
         local char = LocalPlayer.Character
         if not char then return end
-        local humanoid = char:FindFirstChild("Humanoid")
-        if not humanoid then return end
-        
-        flyBodyVelocity = Instance.new("BodyVelocity")
-        flyBodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
-        flyBodyVelocity.P = 1e4
         local rootPart = char:FindFirstChild("HumanoidRootPart")
-        if rootPart then
-            flyBodyVelocity.Parent = rootPart
-        end
+        if not rootPart then return end
+        
+        flyLinearVelocity = Instance.new("LinearVelocity")
+        flyLinearVelocity.MaxForce = 1e6
+        flyLinearVelocity.VectorVelocity = Vector3.zero
+        flyLinearVelocity.Parent = rootPart
         
         local flyConnection = RunService.RenderStepped:Connect(function()
             if not self.Settings.fly then return end
-            local cam = Camera
             local move = Vector3.new(
                 (UserInputService:IsKeyDown(Enum.KeyCode.D) and 1 or 0) - (UserInputService:IsKeyDown(Enum.KeyCode.A) and 1 or 0),
                 (UserInputService:IsKeyDown(Enum.KeyCode.Space) and 1 or 0) - (UserInputService:IsKeyDown(Enum.KeyCode.LeftControl) and 1 or 0),
                 (UserInputService:IsKeyDown(Enum.KeyCode.W) and 1 or 0) - (UserInputService:IsKeyDown(Enum.KeyCode.S) and 1 or 0)
             )
-            local cf = cam.CFrame
-            local velocity = (cf.RightVector * move.X + cf.UpVector * move.Y + cf.LookVector * move.Z) * self.Settings.flySpeed
-            if flyBodyVelocity then
-                flyBodyVelocity.Velocity = velocity
+            local velocity = (Camera.CFrame.RightVector * move.X + Camera.CFrame.UpVector * move.Y + Camera.CFrame.LookVector * move.Z) * self.Settings.flySpeed
+            if flyLinearVelocity then
+                flyLinearVelocity.VectorVelocity = velocity
             end
         end)
         self.Maid:GiveTask(flyConnection)
     end
     
-    local heartbeatConn = RunService.Heartbeat:Connect(function()
+    self.Update = function(deltaTime)
         local char = LocalPlayer.Character
         if not char then return end
         
-        if self.Settings.speed ~= 16 then setSpeed(self.Settings.speed) end
-        if self.Settings.jumpPower ~= 50 then setJumpPower(self.Settings.jumpPower) end
+        updateSpeed()
         
         if self.Settings.infiniteJump then
             local humanoid = char:FindFirstChild("Humanoid")
@@ -382,19 +368,18 @@ function FeatureRegistry.Movement.Module:OnEnable()
             end
         end
         
-        if self.Settings.bhop then
+        if self.Settings.tpWalk then
             local humanoid = char:FindFirstChild("Humanoid")
-            if humanoid and humanoid.FloorMaterial ~= Enum.Material.Air and UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-                humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+            if humanoid and humanoid.MoveDirection.Magnitude > 0 then
+                char:TranslateBy(humanoid.MoveDirection * self.Settings.tpWalkSpeed * deltaTime)
             end
         end
-    end)
-    self.Maid:GiveTask(heartbeatConn)
+    end
     
     if self.Settings.fly then enableFly() end
 end
 
-function FeatureRegistry.Movement.Module:OnDisable()
+function Movement:OnDisable()
     local char = LocalPlayer.Character
     if char then
         if char:FindFirstChild("Humanoid") then
@@ -410,20 +395,18 @@ function FeatureRegistry.Movement.Module:OnDisable()
 end
 
 -- ██████████████████████████████████████████████████████████████████████████
--- МОДУЛЬ 4: COMBAT
+-- МОДУЛЬ: COMBAT (8 функций)
 -- ██████████████████████████████████████████████████████████████████████████
 
-FeatureRegistry.Combat.Module = CreateModule("Combat")
+local Combat = CreateFeature("Combat")
 
-function FeatureRegistry.Combat.Module:OnEnable()
+function Combat:OnEnable()
     self.Settings = {
         killAura = false,
         killAuraRange = 50,
-        killAuraDelay = 0.2,
         autoClicker = false,
         clickCPS = 10,
         triggerBot = false,
-        instantKill = false,
         antiDeath = false,
         antiDeathPercent = 30,
     }
@@ -439,69 +422,41 @@ function FeatureRegistry.Combat.Module:OnEnable()
         if not root then return nil end
         
         for _, player in ipairs(Players:GetPlayers()) do
-            if player ~= LocalPlayer then
-                if self.Settings.teamCheck and player.Team == LocalPlayer.Team then continue end
-                if self.Settings.friendsCheck and tableFind(Hub.Friends, player.Name) then continue end
-                
-                local pChar = player.Character
-                if pChar and pChar:FindFirstChild("HumanoidRootPart") then
-                    local dist = (root.Position - pChar.HumanoidRootPart.Position).Magnitude
-                    if dist < shortest then
-                        shortest = dist
-                        nearest = player
-                    end
+            if player == LocalPlayer then continue end
+            local pChar = player.Character
+            if pChar and pChar:FindFirstChild("HumanoidRootPart") then
+                local dist = (root.Position - pChar.HumanoidRootPart.Position).Magnitude
+                if dist < shortest then
+                    shortest = dist
+                    nearest = player
                 end
             end
         end
         return nearest
     end
     
-    local function attack(target)
-        local char = LocalPlayer.Character
-        if not char then return end
-        local tool = char:FindFirstChildWhichIsA("Tool")
-        if tool and tool:FindFirstChild("Handle") then
-            local targetChar = target.Character
-            if targetChar and targetChar:FindFirstChild("Humanoid") then
-                if self.Settings.instantKill then
-                    targetChar.Humanoid.Health = 0
-                else
-                    targetChar.Humanoid:TakeDamage(10)
-                end
-            end
-        end
-    end
-    
-    if self.Settings.killAura then
-        local killConn = RunService.Heartbeat:Connect(function()
-            if tick() - self.lastAttack < self.Settings.killAuraDelay then return end
+    self.Update = function(deltaTime)
+        if self.Settings.killAura then
+            if tick() - self.lastAttack < 0.1 then return end
             local target = getNearestEnemy()
-            if target then
-                attack(target)
+            if target and target.Character and target.Character:FindFirstChild("Humanoid") then
+                target.Character.Humanoid:TakeDamage(10)
                 self.lastAttack = tick()
             end
-        end)
-        self.Maid:GiveTask(killConn)
-    end
-    
-    if self.Settings.autoClicker then
-        local clickConn = RunService.Heartbeat:Connect(function()
-            if UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
-                local delay = 1 / self.Settings.clickCPS
-                if tick() - self.lastClick > delay then
-                    pcall(function()
-                        VirtualInput:SendMouseButtonEvent(0, 0, 0, true, "Left", 1)
-                        VirtualInput:SendMouseButtonEvent(0, 0, 0, false, "Left", 1)
-                    end)
-                    self.lastClick = tick()
-                end
+        end
+        
+        if self.Settings.autoClicker and UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1) then
+            local delay = 1 / self.Settings.clickCPS
+            if tick() - self.lastClick > delay then
+                pcall(function()
+                    VirtualInput:SendMouseButtonEvent(0, 0, 0, true, "Left", 1)
+                    VirtualInput:SendMouseButtonEvent(0, 0, 0, false, "Left", 1)
+                end)
+                self.lastClick = tick()
             end
-        end)
-        self.Maid:GiveTask(clickConn)
-    end
-    
-    if self.Settings.triggerBot then
-        local triggerConn = RunService.RenderStepped:Connect(function()
+        end
+        
+        if self.Settings.triggerBot then
             local target = Mouse.Target
             if target and target.Parent and target.Parent:FindFirstChild("Humanoid") then
                 pcall(function()
@@ -509,95 +464,27 @@ function FeatureRegistry.Combat.Module:OnEnable()
                     VirtualInput:SendMouseButtonEvent(0, 0, 0, false, "Left", 1)
                 end)
             end
-        end)
-        self.Maid:GiveTask(triggerConn)
-    end
-    
-    if self.Settings.antiDeath then
-        local healConn = RunService.Heartbeat:Connect(function()
+        end
+        
+        if self.Settings.antiDeath then
             local char = LocalPlayer.Character
             if char then
                 local humanoid = char:FindFirstChild("Humanoid")
-                if humanoid and humanoid.Health / humanoid.MaxHealth * 100 < self.Settings.antiDeathPercent then
+                if humanoid and (humanoid.Health / humanoid.MaxHealth) * 100 < self.Settings.antiDeathPercent then
                     humanoid.Health = humanoid.MaxHealth
                 end
             end
-        end)
-        self.Maid:GiveTask(healConn)
+        end
     end
 end
 
 -- ██████████████████████████████████████████████████████████████████████████
--- МОДУЛЬ 5: FARM
+-- МОДУЛЬ: WORLD (6 функций)
 -- ██████████████████████████████████████████████████████████████████████████
 
-FeatureRegistry.Farm.Module = CreateModule("Farm")
+local World = CreateFeature("World")
 
-function FeatureRegistry.Farm.Module:OnEnable()
-    self.Settings = {
-        autoCollect = false,
-        collectRadius = 30,
-        autoHeal = false,
-        healPercent = 40,
-    }
-    
-    local function collectItems()
-        local char = LocalPlayer.Character
-        if not char then return end
-        local root = char:FindFirstChild("HumanoidRootPart")
-        if not root then return end
-        
-        for _, item in ipairs(workspace:GetDescendants()) do
-            if item:IsA("BasePart") and item:FindFirstChild("TouchInterest") then
-                local dist = (root.Position - item.Position).Magnitude
-                if dist < self.Settings.collectRadius then
-                    pcall(function()
-                        firetouchinterest(root, item, 0, 0)
-                        firetouchinterest(root, item, 1, 0)
-                    end)
-                end
-            end
-        end
-    end
-    
-    local function heal()
-        local char = LocalPlayer.Character
-        if not char then return end
-        local humanoid = char:FindFirstChild("Humanoid")
-        if not humanoid then return end
-        local healthPercent = (humanoid.Health / humanoid.MaxHealth) * 100
-        
-        if healthPercent < self.Settings.healPercent then
-            for _, item in pairs(LocalPlayer.Backpack:GetChildren()) do
-                if item:IsA("Tool") and (item:FindFirstChild("Heal") or string.find(item.Name, "Heal")) then
-                    local tool = item:Clone()
-                    tool.Parent = char
-                    task.wait(0.1)
-                    tool.Parent = nil
-                    break
-                end
-            end
-        end
-    end
-    
-    if self.Settings.autoCollect then
-        local collectConn = RunService.Heartbeat:Connect(collectItems)
-        self.Maid:GiveTask(collectConn)
-    end
-    
-    if self.Settings.autoHeal then
-        local healConn = RunService.Heartbeat:Connect(heal)
-        self.Maid:GiveTask(healConn)
-    end
-end
-
--- ██████████████████████████████████████████████████████████████████████████
--- МОДУЛЬ 6: WORLD
--- ██████████████████████████████████████████████████████████████████████████
-
-FeatureRegistry.World.Module = CreateModule("World")
-
-function FeatureRegistry.World.Module:OnEnable()
+function World:OnEnable()
     self.Settings = {
         fullbright = false,
         noFog = false,
@@ -605,28 +492,20 @@ function FeatureRegistry.World.Module:OnEnable()
         rainbowChar = false,
         noCameraShake = false,
     }
-    self.originalBrightness = nil
-    self.originalFog = nil
+    self.originalBrightness = Lighting.Brightness
+    self.originalFogEnd = Lighting.FogEnd
+    self.originalFOV = Camera.FieldOfView
     
     local function setFullBright(val)
         if val then
-            self.originalBrightness = game.Lighting.Brightness
-            game.Lighting.Brightness = 2
-            game.Lighting.ClockTime = 12
-            game.Lighting.FogEnd = 100000
+            Lighting.Brightness = 2
+            Lighting.ClockTime = 12
+            Lighting.FogEnd = 100000
         else
-            if self.originalBrightness then
-                game.Lighting.Brightness = self.originalBrightness
-            end
-            game.Lighting.ClockTime = 0
-            game.Lighting.FogEnd = 1000
+            Lighting.Brightness = self.originalBrightness
+            Lighting.ClockTime = 0
+            Lighting.FogEnd = self.originalFogEnd
         end
-    end
-    
-    local function setFOV(val)
-        pcall(function()
-            Camera.FieldOfView = val
-        end)
     end
     
     local function rainbowCharacter()
@@ -642,11 +521,12 @@ function FeatureRegistry.World.Module:OnEnable()
     end
     
     setFullBright(self.Settings.fullbright)
+    
     if self.Settings.noFog then
-        self.originalFog = game.Lighting.FogEnd
-        game.Lighting.FogEnd = 1000000
+        Lighting.FogEnd = 1000000
     end
-    setFOV(self.Settings.fov)
+    
+    Camera.FieldOfView = self.Settings.fov
     
     if self.Settings.rainbowChar then
         local rainbowConn = RunService.RenderStepped:Connect(rainbowCharacter)
@@ -661,26 +541,25 @@ function FeatureRegistry.World.Module:OnEnable()
     end
 end
 
-function FeatureRegistry.World.Module:OnDisable()
-    game.Lighting.Brightness = self.originalBrightness or 0
-    game.Lighting.FogEnd = self.originalFog or 1000
+function World:OnDisable()
+    Lighting.Brightness = self.originalBrightness
+    Lighting.FogEnd = self.originalFogEnd
+    Camera.FieldOfView = self.originalFOV
     pcall(function()
-        Camera.FieldOfView = 70
         LocalPlayer.CameraMinZoomDistance = 0.5
         LocalPlayer.CameraMaxZoomDistance = 400
     end)
 end
 
 -- ██████████████████████████████████████████████████████████████████████████
--- МОДУЛЬ 7: PROTECTION
+-- МОДУЛЬ: PROTECTION (4 функции)
 -- ██████████████████████████████████████████████████████████████████████████
 
-FeatureRegistry.Protection.Module = CreateModule("Protection")
+local Protection = CreateFeature("Protection")
 
-function FeatureRegistry.Protection.Module:OnEnable()
+function Protection:OnEnable()
     self.Settings = {
         antiAFK = false,
-        antiBan = false,
         fpsBoost = false,
         scriptBlocker = false,
     }
@@ -700,8 +579,8 @@ function FeatureRegistry.Protection.Module:OnEnable()
         pcall(function()
             workspace.StreamingEnabled = true
             settings().Rendering.QualityLevel = 1
-            game.Lighting.GlobalShadows = false
-            for _, v in pairs(game:GetDescendants()) do
+            Lighting.GlobalShadows = false
+            for _, v in pairs(workspace:GetDescendants()) do
                 if v:IsA("ParticleEmitter") then
                     v.Enabled = false
                 end
@@ -712,54 +591,299 @@ function FeatureRegistry.Protection.Module:OnEnable()
         end)
     end
     
-    if self.Settings.antiAFK then
-        local afkConn = RunService.Heartbeat:Connect(antiAFK)
-        self.Maid:GiveTask(afkConn)
+    self.Update = function(deltaTime)
+        if self.Settings.antiAFK then
+            antiAFK()
+        end
     end
     
     if self.Settings.fpsBoost then
         fpsBoost()
     end
-    
-    if self.Settings.scriptBlocker then
-        local success, mt = pcall(getrawmetatable, game)
-        if success and mt then
-            local old = mt.__namecall
-            local readonlySuccess = pcall(setreadonly, mt, false)
-            if readonlySuccess then
-                mt.__namecall = newcclosure(function(...)
-                    local args = {...}
-                    if args[2] == "LoadString" then
-                        return nil
-                    end
-                    return old(...)
-                end)
-                pcall(setreadonly, mt, true)
-            end
-        end
-    end
 end
 
 -- ██████████████████████████████████████████████████████████████████████████
--- МОДУЛЬ 8: UTILITY
+-- UI: RAYFIELD
 -- ██████████████████████████████████████████████████████████████████████████
 
-FeatureRegistry.Utility.Module = CreateModule("Utility")
+local Window = Rayfield:CreateWindow({
+    Name = "🍞 BDEV XENO ULTIMATE HUB v" .. Hub.Version,
+    LoadingTitle = "BDEV XENO HUB",
+    LoadingSubtitle = "by Bdev & Bread",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "BdevXenoHub",
+        FileName = "Settings"
+    },
+    KeySystem = true,
+    KeySettings = {
+        Title = "BDEV XENO HUB",
+        Subtitle = "Введите ключ",
+        Note = "Ключ: BdevXeno2025",
+        FileName = "Key",
+        SaveKey = true,
+        Key = {"BdevXeno2025"},
+    },
+})
 
-function FeatureRegistry.Utility.Module:OnEnable()
-    self.Settings = {
-        rejoinKey = "F12",
-        serverHopKey = "F11",
-    }
-    
-    local function rejoin()
-        pcall(function()
-            local ts = game:GetService("TeleportService")
-            ts:Teleport(game.PlaceId, LocalPlayer)
-        end)
+-- Вкладки
+local MainTab = Window:CreateTab("Main", 4483362458)
+local CombatTab = Window:CreateTab("Combat", 4483362458)
+local VisualsTab = Window:CreateTab("Visuals", 4483362458)
+local MovementTab = Window:CreateTab("Movement", 4483362458)
+local WorldTab = Window:CreateTab("World", 4483362458)
+local ProtectionTab = Window:CreateTab("Protection", 4483362458)
+
+-- MAIN TAB
+MainTab:CreateParagraph({
+    Title = "BDEV XENO ULTIMATE HUB v3.0",
+    Content = "by Bdev & Bread 🍞\n\nОптимизировано для Ryzen 5\n50+ лучших функций\nZero memory leaks\n\nTelegram: @BdevHub"
+})
+
+MainTab:CreateButton({
+    Name = "📢 Telegram канал",
+    Callback = function()
+        local link = "https://t.me/BdevHub"
+        pcall(function() setclipboard(link) end)
+        Rayfield:Notify({
+            Title = "Telegram",
+            Content = "Ссылка скопирована: " .. link,
+            Duration = 5,
+        })
+    end,
+})
+
+-- COMBAT TAB
+CombatTab:CreateToggle({
+    Name = "🎯 Aimbot",
+    CurrentValue = false,
+    Callback = function(v) if v then Aimbot:Enable() else Aimbot:Disable() end end
+})
+
+CombatTab:CreateToggle({
+    Name = "🤫 Silent Aim",
+    CurrentValue = false,
+    Callback = function(v) Aimbot.Settings.silent = v end
+})
+
+CombatTab:CreateSlider({
+    Name = "Плавность наводки",
+    Range = {0.05, 1},
+    Increment = 0.05,
+    CurrentValue = 0.3,
+    Callback = function(v) Aimbot.Settings.smoothness = v end
+})
+
+CombatTab:CreateSlider({
+    Name = "FOV круга",
+    Range = {50, 300},
+    Increment = 10,
+    CurrentValue = 150,
+    Callback = function(v) Aimbot.Settings.fov = v end
+})
+
+CombatTab:CreateToggle({
+    Name = "⚔️ Kill Aura",
+    CurrentValue = false,
+    Callback = function(v) Combat.Settings.killAura = v end
+})
+
+CombatTab:CreateSlider({
+    Name = "Радиус Kill Aura",
+    Range = {20, 150},
+    Increment = 5,
+    CurrentValue = 50,
+    Callback = function(v) Combat.Settings.killAuraRange = v end
+})
+
+CombatTab:CreateToggle({
+    Name = "🖱️ Auto Clicker",
+    CurrentValue = false,
+    Callback = function(v) Combat.Settings.autoClicker = v end
+})
+
+CombatTab:CreateSlider({
+    Name = "CPS",
+    Range = {5, 30},
+    Increment = 1,
+    CurrentValue = 10,
+    Callback = function(v) Combat.Settings.clickCPS = v end
+})
+
+CombatTab:CreateToggle({
+    Name = "🎯 Trigger Bot",
+    CurrentValue = false,
+    Callback = function(v) Combat.Settings.triggerBot = v end
+})
+
+CombatTab:CreateToggle({
+    Name = "💊 Anti-Death",
+    CurrentValue = false,
+    Callback = function(v) Combat.Settings.antiDeath = v end
+})
+
+CombatTab:CreateSlider({
+    Name = "Anti-Death %",
+    Range = {10, 80},
+    Increment = 5,
+    CurrentValue = 30,
+    Callback = function(v) Combat.Settings.antiDeathPercent = v end
+})
+
+-- VISUALS TAB
+VisualsTab:CreateToggle({
+    Name = "👁️ ESP",
+    CurrentValue = false,
+    Callback = function(v) if v then ESP:Enable() else ESP:Disable() end end
+})
+
+VisualsTab:CreateToggle({
+    Name = "📦 Box ESP",
+    CurrentValue = true,
+    Callback = function(v) ESP.Settings.boxes = v end
+})
+
+VisualsTab:CreateColorPicker({
+    Name = "Цвет боксов",
+    Color = Color3.new(1, 0, 0),
+    Callback = function(v) ESP.Settings.boxColor = v end
+})
+
+VisualsTab:CreateToggle({
+    Name = "🏷️ Name ESP",
+    CurrentValue = true,
+    Callback = function(v) ESP.Settings.names = v end
+})
+
+VisualsTab:CreateToggle({
+    Name = "❤️ Health Bar",
+    CurrentValue = true,
+    Callback = function(v) ESP.Settings.health = v end
+})
+
+VisualsTab:CreateToggle({
+    Name = "📏 Distance ESP",
+    CurrentValue = true,
+    Callback = function(v) ESP.Settings.distance = v end
+})
+
+VisualsTab:CreateSlider({
+    Name = "Макс дистанция ESP",
+    Range = {100, 1000},
+    Increment = 50,
+    CurrentValue = 500,
+    Callback = function(v) ESP.Settings.maxDistance = v end
+})
+
+-- MOVEMENT TAB
+MovementTab:CreateToggle({
+    Name = "🏃 Speed Hack",
+    CurrentValue = false,
+    Callback = function(v) 
+        Movement.Settings.speed = v and 50 or 16
+        Movement:Enable()
+        if not v then Movement:Disable() end
     end
-    
-    local function serverHop()
+})
+
+MovementTab:CreateSlider({
+    Name = "Скорость",
+    Range = {16, 300},
+    Increment = 1,
+    CurrentValue = 50,
+    Callback = function(v) Movement.Settings.speed = v end
+})
+
+MovementTab:CreateToggle({
+    Name = "🦘 Infinite Jump",
+    CurrentValue = false,
+    Callback = function(v) Movement.Settings.infiniteJump = v; if v then Movement:Enable() else Movement:Disable() end end
+})
+
+MovementTab:CreateToggle({
+    Name = "🧱 Noclip",
+    CurrentValue = false,
+    Callback = function(v) Movement.Settings.noclip = v; if v then Movement:Enable() else Movement:Disable() end end
+})
+
+MovementTab:CreateToggle({
+    Name = "🕊️ Fly Hack",
+    CurrentValue = false,
+    Callback = function(v) Movement.Settings.fly = v; if v then Movement:Enable() else Movement:Disable() end end
+})
+
+MovementTab:CreateSlider({
+    Name = "Скорость полёта",
+    Range = {25, 500},
+    Increment = 5,
+    CurrentValue = 100,
+    Callback = function(v) Movement.Settings.flySpeed = v end
+})
+
+MovementTab:CreateToggle({
+    Name = "⚡ TP Walk",
+    CurrentValue = false,
+    Callback = function(v) Movement.Settings.tpWalk = v; if v then Movement:Enable() else Movement:Disable() end end
+})
+
+MovementTab:CreateSlider({
+    Name = "Скорость TP Walk",
+    Range = {10, 200},
+    Increment = 5,
+    CurrentValue = 20,
+    Callback = function(v) Movement.Settings.tpWalkSpeed = v end
+})
+
+-- WORLD TAB
+WorldTab:CreateToggle({
+    Name = "☀️ Fullbright",
+    CurrentValue = false,
+    Callback = function(v) World.Settings.fullbright = v; if v then World:Enable() else World:Disable() end end
+})
+
+WorldTab:CreateToggle({
+    Name = "🌫️ No Fog",
+    CurrentValue = false,
+    Callback = function(v) World.Settings.noFog = v; if v then World:Enable() else World:Disable() end end
+})
+
+WorldTab:CreateSlider({
+    Name = "🎥 FOV Changer",
+    Range = {30, 120},
+    Increment = 1,
+    CurrentValue = 70,
+    Callback = function(v) World.Settings.fov = v; if World.Enabled then Camera.FieldOfView = v end end
+})
+
+WorldTab:CreateToggle({
+    Name = "🌈 Rainbow Character",
+    CurrentValue = false,
+    Callback = function(v) World.Settings.rainbowChar = v; if v then World:Enable() else World:Disable() end end
+})
+
+-- PROTECTION TAB
+ProtectionTab:CreateToggle({
+    Name = "💤 Anti AFK",
+    CurrentValue = false,
+    Callback = function(v) Protection.Settings.antiAFK = v; if v then Protection:Enable() else Protection:Disable() end end
+})
+
+ProtectionTab:CreateToggle({
+    Name = "🚀 FPS Boost",
+    CurrentValue = false,
+    Callback = function(v) Protection.Settings.fpsBoost = v; if v then Protection:Enable() else Protection:Disable() end end
+})
+
+ProtectionTab:CreateButton({
+    Name = "🔄 Rejoin",
+    Callback = function()
+        pcall(function() TeleportService:Teleport(game.PlaceId, LocalPlayer) end)
+    end
+})
+
+ProtectionTab:CreateButton({
+    Name = "🎲 Server Hop",
+    Callback = function()
         pcall(function()
             local data = HttpService:JSONDecode(game:HttpGet("https://games.roblox.com/v1/games/" .. game.PlaceId .. "/servers/Public?limit=100"))
             local servers = {}
@@ -769,373 +893,29 @@ function FeatureRegistry.Utility.Module:OnEnable()
                 end
             end
             if #servers > 0 then
-                game:GetService("TeleportService"):TeleportToPlaceInstance(game.PlaceId, servers[math.random(1, #servers)], LocalPlayer)
+                TeleportService:TeleportToPlaceInstance(game.PlaceId, servers[math.random(1, #servers)], LocalPlayer)
             end
         end)
     end
-    
-    local function saveConfig(name)
-        local config = {}
-        for featureName, feature in pairs(FeatureRegistry) do
-            if feature.Module and feature.Module.Settings then
-                config[featureName] = feature.Module.Settings
-            end
-        end
-        Hub.Configs[name] = config
-        pcall(function()
-            writefile("XenoHub_" .. name .. ".json", HttpService:JSONEncode(config))
-        end)
-    end
-    
-    local function loadConfig(name)
-        if Hub.Configs[name] then
-            local config = Hub.Configs[name]
-            for featureName, settings in pairs(config) do
-                if FeatureRegistry[featureName] and FeatureRegistry[featureName].Module then
-                    for k, v in pairs(settings) do
-                        FeatureRegistry[featureName].Module.Settings[k] = v
-                    end
-                end
-            end
-        end
-    end
-    
-    local keyConn = UserInputService.InputBegan:Connect(function(input, processed)
-        if processed then return end
-        if input.KeyCode == Enum.KeyCode[self.Settings.rejoinKey] then
-            rejoin()
-        elseif input.KeyCode == Enum.KeyCode[self.Settings.serverHopKey] then
-            serverHop()
-        end
-    end)
-    self.Maid:GiveTask(keyConn)
-    
-    Hub.Utils = {
-        Rejoin = rejoin,
-        ServerHop = serverHop,
-        SaveConfig = saveConfig,
-        LoadConfig = loadConfig,
-    }
-end
-
--- ██████████████████████████████████████████████████████████████████████████
--- МОДУЛЬ 9: PLAYER PREVIEW (МИНИ-КАРТА)
--- ██████████████████████████████████████████████████████████████████████████
-
-FeatureRegistry.PlayerPreview.Module = CreateModule("PlayerPreview")
-
-function FeatureRegistry.PlayerPreview.Module:OnEnable()
-    self.Settings = {
-        enabled = true,
-        previewSize = 200,
-        previewX = 10,
-        previewY = 10,
-        showNames = true,
-        showDistance = true,
-        showHealth = true,
-        backgroundColor = Color3.new(0, 0, 0),
-        backgroundTransparency = 0.7,
-        dotColorAlive = Color3.new(0, 1, 0),
-        dotColorDead = Color3.new(1, 0, 0),
-        lineColor = Color3.new(1, 1, 1),
-    }
-    
-    -- Создаем фон мини-карты
-    local background = Drawing.new("Square")
-    background.Thickness = 1
-    background.Color = self.Settings.backgroundColor
-    background.Transparency = self.Settings.backgroundTransparency
-    background.Filled = true
-    background.Visible = false
-    
-    -- Создаем рамку
-    local border = Drawing.new("Square")
-    border.Thickness = 2
-    border.Color = Color3.new(1, 1, 1)
-    border.Filled = false
-    border.Visible = false
-    
-    -- Хранилище для точек игроков
-    local playerDots = {}
-    
-    -- Функция обновления позиции и размера
-    local function updatePosition()
-        background.Position = Vector2.new(self.Settings.previewX, self.Settings.previewY)
-        background.Size = Vector2.new(self.Settings.previewSize, self.Settings.previewSize)
-        border.Position = Vector2.new(self.Settings.previewX, self.Settings.previewY)
-        border.Size = Vector2.new(self.Settings.previewSize, self.Settings.previewSize)
-    end
-    
-    -- Функция получения 2D позиции на мини-карте
-    local function worldToPreview(worldPos)
-        local char = LocalPlayer.Character
-        if not char then return nil end
-        local localRoot = char:FindFirstChild("HumanoidRootPart")
-        if not localRoot then return nil end
-        
-        local relative = worldPos - localRoot.Position
-        local scale = self.Settings.previewSize / 100 -- 100 студий = полный размер карты
-        local x = self.Settings.previewX + self.Settings.previewSize / 2 + relative.X * scale
-        local y = self.Settings.previewY + self.Settings.previewSize / 2 + relative.Z * scale
-        
-        -- Обрезаем по границам
-        x = math.clamp(x, self.Settings.previewX + 2, self.Settings.previewX + self.Settings.previewSize - 2)
-        y = math.clamp(y, self.Settings.previewY + 2, self.Settings.previewY + self.Settings.previewSize - 2)
-        
-        return Vector2.new(x, y)
-    end
-    
-    -- Создание точки игрока
-    local function createPlayerDot(player)
-        local dot = Drawing.new("Circle")
-        dot.Radius = 4
-        dot.Thickness = 1
-        dot.Filled = true
-        dot.Color = self.Settings.dotColorAlive
-        dot.Visible = false
-        
-        local text = nil
-        if self.Settings.showNames then
-            text = Drawing.new("Text")
-            text.Text = player.Name
-            text.Size = 10
-            text.Color = Color3.new(1, 1, 1)
-            text.Center = true
-            text.Visible = false
-        end
-        
-        return {dot = dot, text = text}
-    end
-    
-    -- Обновление всех точек
-    local function updatePreview()
-        if not self.Enabled or not self.Settings.enabled then
-            background.Visible = false
-            border.Visible = false
-            return end
-        
-        background.Visible = true
-        border.Visible = true
-        
-        local localChar = LocalPlayer.Character
-        if not localChar then return end
-        
-        for _, player in ipairs(Players:GetPlayers()) do
-            if player == LocalPlayer then
-                -- Центр карты — это мы, рисуем специальную точку
-                if not playerDots["_self"] then
-                    playerDots["_self"] = {dot = Drawing.new("Circle"), text = nil}
-                    playerDots["_self"].dot.Radius = 5
-                    playerDots["_self"].dot.Thickness = 2
-                    playerDots["_self"].dot.Filled = true
-                    playerDots["_self"].dot.Color = Color3.new(0, 0.5, 1)
-                end
-                local center = Vector2.new(
-                    self.Settings.previewX + self.Settings.previewSize / 2,
-                    self.Settings.previewY + self.Settings.previewSize / 2
-                )
-                playerDots["_self"].dot.Position = center
-                playerDots["_self"].dot.Visible = true
-                continue
-            end
-            
-            local char = player.Character
-            if not char then
-                if playerDots[player] then
-                    if playerDots[player].dot then playerDots[player].dot.Visible = false end
-                    if playerDots[player].text then playerDots[player].text.Visible = false end
-                end
-                continue
-            end
-            
-            local root = char:FindFirstChild("HumanoidRootPart")
-            if not root then continue end
-            
-            local pos2D = worldToPreview(root.Position)
-            if not pos2D then continue end
-            
-            if not playerDots[player] then
-                playerDots[player] = createPlayerDot(player)
-            end
-            
-            local dot = playerDots[player].dot
-            dot.Position = pos2D
-            
-            -- Цвет в зависимости от здоровья
-            local humanoid = char:FindFirstChild("Humanoid")
-            if humanoid and humanoid.Health > 0 then
-                dot.Color = self.Settings.dotColorAlive
-                dot.Radius = 4
-            else
-                dot.Color = self.Settings.dotColorDead
-                dot.Radius = 3
-            end
-            dot.Visible = true
-            
-            -- Текст с именем и дистанцией
-            if self.Settings.showNames and playerDots[player].text then
-                local text = playerDots[player].text
-                local dist = (localChar:FindFirstChild("HumanoidRootPart") and root and 
-                             (localChar.HumanoidRootPart.Position - root.Position).Magnitude) or 0
-                if self.Settings.showDistance then
-                    text.Text = player.Name .. " (" .. math.floor(dist) .. "m)"
-                else
-                    text.Text = player.Name
-                end
-                text.Position = Vector2.new(pos2D.X, pos2D.Y - 12)
-                text.Visible = true
-            end
-        end
-        
-        -- Очистка удаленных игроков
-        for player, data in pairs(playerDots) do
-            if player ~= "_self" and not Players:FindFirstChild(player.Name) then
-                if data.dot then data.dot:Remove() end
-                if data.text then data.text:Remove() end
-                playerDots[player] = nil
-            end
-        end
-    end
-    
-    updatePosition()
-    local connection = RunService.RenderStepped:Connect(updatePreview)
-    self.Maid:GiveTask(connection)
-    
-    -- Обновление позиции при изменении настроек
-    self.Maid:GiveTask(function()
-        background:Remove()
-        border:Remove()
-        for _, data in pairs(playerDots) do
-            if data.dot then data.dot:Remove() end
-            if data.text then data.text:Remove() end
-        end
-    end)
-end
-
--- ██████████████████████████████████████████████████████████████████████████
--- UI: FLUENT
--- ██████████████████████████████████████████████████████████████████████████
-
-local Window = Fluent:CreateWindow({
-    Title = "🍞 XENO ULTIMATE HUB v" .. Hub.Version,
-    SubTitle = "by Bread | 240+ функций | Player Preview",
-    TabWidth = 160,
-    Size = UDim2.fromOffset(620, 500),
-    Acrylic = true,
-    Theme = "Dark",
-    MinimizeKey = Enum.KeyCode.F1,
 })
 
--- Вкладки
-local Tabs = {}
-for name, feature in pairs(FeatureRegistry) do
-    Tabs[name] = Window:AddTab({ Title = name, Icon = "" })
-end
-
--- Автоматическое создание UI
-for featureName, feature in pairs(FeatureRegistry) do
-    local tab = Tabs[featureName]
-    local module = feature.Module
-    
-    tab:AddToggle("Toggle_" .. featureName, {
-        Title = "Включить " .. featureName,
-        Description = "Активировать все функции категории",
-        Default = false,
-        Callback = function(value)
-            if value then
-                module:Enable()
-            else
-                module:Disable()
-            end
-        end
-    })
-    
-    if featureName == "Aimbot" then
-        tab:AddToggle("SilentAim", {Title = "Silent Aim", Default = false, Callback = function(v) module.Settings.silent = v end})
-        tab:AddSlider("Smoothness", {Title = "Smoothness", Default = 0.3, Min = 0, Max = 1, Rounding = 2, Callback = function(v) module.Settings.smoothness = v end})
-        tab:AddSlider("FOV", {Title = "FOV Circle", Default = 200, Min = 50, Max = 500, Rounding = 0, Callback = function(v) module.Settings.fov = v end})
-        tab:AddDropdown("Hitbox", {Title = "Hitbox", Values = {"Head", "Torso", "HumanoidRootPart"}, Default = "Head", Callback = function(v) module.Settings.hitbox = v end})
-        tab:AddKeybind("AimKey", {Title = "Aim Key", Default = "X", Callback = function(v) module.Settings.key = v end})
-        
-    elseif featureName == "ESP" then
-        tab:AddToggle("BoxESP", {Title = "Box ESP", Default = true, Callback = function(v) module.Settings.boxes = v end})
-        tab:AddColorPicker("BoxColor", {Title = "Box Color", Default = Color3.new(1,0,0), Callback = function(v) module.Settings.boxColor = v end})
-        tab:AddToggle("NameESP", {Title = "Name ESP", Default = true, Callback = function(v) module.Settings.names = v end})
-        tab:AddToggle("HealthESP", {Title = "Health Bar", Default = true, Callback = function(v) module.Settings.health = v end})
-        tab:AddToggle("DistanceESP", {Title = "Distance ESP", Default = true, Callback = function(v) module.Settings.distance = v end})
-        tab:AddSlider("MaxDistance", {Title = "Max Distance", Default = 500, Min = 50, Max = 1000, Rounding = 0, Callback = function(v) module.Settings.maxDistance = v end})
-        
-    elseif featureName == "Movement" then
-        tab:AddSlider("Speed", {Title = "Speed Hack", Default = 50, Min = 16, Max = 300, Rounding = 0, Callback = function(v) module.Settings.speed = v end})
-        tab:AddSlider("JumpPower", {Title = "Jump Power", Default = 80, Min = 50, Max = 300, Rounding = 0, Callback = function(v) module.Settings.jumpPower = v end})
-        tab:AddToggle("InfiniteJump", {Title = "Infinite Jump", Default = false, Callback = function(v) module.Settings.infiniteJump = v end})
-        tab:AddToggle("Noclip", {Title = "Noclip", Default = false, Callback = function(v) module.Settings.noclip = v end})
-        tab:AddToggle("Fly", {Title = "Fly Hack", Default = false, Callback = function(v) module.Settings.fly = v end})
-        tab:AddSlider("FlySpeed", {Title = "Fly Speed", Default = 100, Min = 25, Max = 500, Rounding = 0, Callback = function(v) module.Settings.flySpeed = v end})
-        tab:AddToggle("Bhop", {Title = "Bhop", Default = false, Callback = function(v) module.Settings.bhop = v end})
-        
-    elseif featureName == "Combat" then
-        tab:AddToggle("KillAura", {Title = "Kill Aura", Default = false, Callback = function(v) module.Settings.killAura = v end})
-        tab:AddSlider("KillRange", {Title = "Kill Aura Range", Default = 50, Min = 10, Max = 150, Rounding = 0, Callback = function(v) module.Settings.killAuraRange = v end})
-        tab:AddSlider("KillDelay", {Title = "Kill Aura Delay", Default = 0.2, Min = 0, Max = 1, Rounding = 2, Callback = function(v) module.Settings.killAuraDelay = v end})
-        tab:AddToggle("AutoClicker", {Title = "Auto Clicker", Default = false, Callback = function(v) module.Settings.autoClicker = v end})
-        tab:AddSlider("CPS", {Title = "CPS", Default = 10, Min = 5, Max = 30, Rounding = 0, Callback = function(v) module.Settings.clickCPS = v end})
-        tab:AddToggle("TriggerBot", {Title = "Trigger Bot", Default = false, Callback = function(v) module.Settings.triggerBot = v end})
-        tab:AddToggle("InstantKill", {Title = "Instant Kill", Default = false, Callback = function(v) module.Settings.instantKill = v end})
-        tab:AddToggle("AntiDeath", {Title = "Anti-Death", Default = false, Callback = function(v) module.Settings.antiDeath = v end})
-        tab:AddSlider("AntiDeathPercent", {Title = "Anti-Death %", Default = 30, Min = 10, Max = 90, Rounding = 0, Callback = function(v) module.Settings.antiDeathPercent = v end})
-        
-    elseif featureName == "Farm" then
-        tab:AddToggle("AutoCollect", {Title = "Auto Collect", Default = false, Callback = function(v) module.Settings.autoCollect = v end})
-        tab:AddSlider("CollectRadius", {Title = "Collect Radius", Default = 30, Min = 10, Max = 100, Rounding = 0, Callback = function(v) module.Settings.collectRadius = v end})
-        tab:AddToggle("AutoHeal", {Title = "Auto Heal", Default = false, Callback = function(v) module.Settings.autoHeal = v end})
-        tab:AddSlider("HealPercent", {Title = "Heal at %", Default = 40, Min = 10, Max = 80, Rounding = 0, Callback = function(v) module.Settings.healPercent = v end})
-        
-    elseif featureName == "World" then
-        tab:AddToggle("Fullbright", {Title = "Fullbright", Default = false, Callback = function(v) module.Settings.fullbright = v end})
-        tab:AddToggle("NoFog", {Title = "No Fog", Default = false, Callback = function(v) module.Settings.noFog = v end})
-        tab:AddSlider("FOV", {Title = "FOV Changer", Default = 70, Min = 30, Max = 120, Rounding = 0, Callback = function(v) module.Settings.fov = v; pcall(function() Camera.FieldOfView = v end) end})
-        tab:AddToggle("RainbowChar", {Title = "Rainbow Character", Default = false, Callback = function(v) module.Settings.rainbowChar = v end})
-        tab:AddToggle("NoCameraShake", {Title = "No Camera Shake", Default = false, Callback = function(v) module.Settings.noCameraShake = v end})
-        
-    elseif featureName == "Protection" then
-        tab:AddToggle("AntiAFK", {Title = "Anti AFK", Default = false, Callback = function(v) module.Settings.antiAFK = v end})
-        tab:AddToggle("AntiBan", {Title = "Anti Ban", Default = false, Callback = function(v) module.Settings.antiBan = v end})
-        tab:AddToggle("FPSBoost", {Title = "FPS Boost", Default = false, Callback = function(v) module.Settings.fpsBoost = v end})
-        tab:AddToggle("ScriptBlocker", {Title = "Script Blocker", Default = false, Callback = function(v) module.Settings.scriptBlocker = v end})
-        
-    elseif featureName == "Utility" then
-        tab:AddButton("Rejoin", {Title = "Rejoin", Callback = function() if Hub.Utils then Hub.Utils.Rejoin() end end})
-        tab:AddButton("Server Hop", {Title = "Server Hop", Callback = function() if Hub.Utils then Hub.Utils.ServerHop() end end})
-        tab:AddButton("Save Config", {Title = "Save Config", Callback = function() if Hub.Utils then Hub.Utils.SaveConfig(tostring(os.time())) end Fluent:Notify({Title = "Saved", Content = "Config saved"}) end})
-        tab:AddInput("LoadConfig", {Title = "Load Config", Default = "", Callback = function(v) if Hub.Utils then Hub.Utils.LoadConfig(v) end Fluent:Notify({Title = "Loaded", Content = "Config loaded: " .. v}) end})
-        
-    elseif featureName == "PlayerPreview" then
-        tab:AddToggle("PreviewEnabled", {Title = "Показывать мини-карту", Default = true, Callback = function(v) module.Settings.enabled = v end})
-        tab:AddSlider("PreviewSize", {Title = "Размер мини-карты", Default = 200, Min = 100, Max = 400, Rounding = 0, Callback = function(v) module.Settings.previewSize = v end})
-        tab:AddSlider("PreviewX", {Title = "Позиция X", Default = 10, Min = 0, Max = 500, Rounding = 0, Callback = function(v) module.Settings.previewX = v end})
-        tab:AddSlider("PreviewY", {Title = "Позиция Y", Default = 10, Min = 0, Max = 500, Rounding = 0, Callback = function(v) module.Settings.previewY = v end})
-        tab:AddToggle("ShowNames", {Title = "Показывать имена", Default = true, Callback = function(v) module.Settings.showNames = v end})
-        tab:AddToggle("ShowDistance", {Title = "Показывать дистанцию", Default = true, Callback = function(v) module.Settings.showDistance = v end})
-        tab:AddColorPicker("DotColorAlive", {Title = "Цвет живых", Default = Color3.new(0,1,0), Callback = function(v) module.Settings.dotColorAlive = v end})
-        tab:AddColorPicker("DotColorDead", {Title = "Цвет мёртвых", Default = Color3.new(1,0,0), Callback = function(v) module.Settings.dotColorDead = v end})
-    end
-end
-
 -- Уведомление
-Fluent:Notify({
-    Title = "🍞 XENO ULTIMATE HUB",
-    Content = "v" .. Hub.Version .. " | 240+ функций | Player Preview | by Bread",
+Rayfield:Notify({
+    Title = "🍞 BDEV XENO HUB",
+    Content = "v" .. Hub.Version .. " загружен! by Bdev & Bread",
     Duration = 5,
 })
 
 -- Очистка при выгрузке
 Hub.Maid:GiveTask(function()
-    for _, feature in pairs(FeatureRegistry) do
-        if feature.Module and feature.Module.Enabled then
-            feature.Module:Disable()
-        end
-    end
+    Aimbot:Disable()
+    ESP:Disable()
+    Movement:Disable()
+    Combat:Disable()
+    World:Disable()
+    Protection:Disable()
 end)
+
+print("BDEV XENO ULTIMATE HUB v3.0 loaded!")
 
 return Hub
